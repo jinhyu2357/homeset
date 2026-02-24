@@ -1,0 +1,44 @@
+# Homeset plugin configuration
+# Settings:
+#   settings.home_damage_cooldown_seconds - seconds after taking damage where /home is blocked (0 disables)
+#   settings.home_teleport_delay_seconds - seconds before /home teleports (0 disables delay)
+#   settings.max_homes_per_player - max homes per player (0 disables limit)
+# Placeholders:
+#   {home_name} - the home name used in the command
+#   {homes} - comma-separated list of saved home names
+#   {cooldown_seconds} - configured /home damage cooldown seconds
+#   {remaining_seconds} - seconds left before /home can be used
+#   {delay_seconds} - configured /home delay seconds
+#   {max_homes} - configured max number of homes per player
+settings:
+  home_damage_cooldown_seconds: 5
+  home_teleport_delay_seconds: 3
+  max_homes_per_player: 3
+
+messages:
+  only_players: "&cOnly players can use this command."
+  usage_sethome: "&eUsage: /sethome [name]"
+  usage_home: "&eUsage: /home [name]"
+  usage_delhome: "&eUsage: /delhome [name]"
+  usage_homes: "&eUsage: /homes"
+  usage_homesetreload: "&eUsage: /homesetreload"
+  invalid_home_name: "&cInvalid home name."
+  invalid_home_name_detailed: "&cHome name must be 1-32 characters: letters, numbers, _ or -."
+  sethome_limit_reached: "&cYou can only have up to {max_homes} homes."
+  sethome_success: "&aHome '{home_name}' has been saved."
+  sethome_db_error: "&cFailed to save your home due to a database error."
+  reload_success: "&aHomeset config has been reloaded."
+  reload_failed: "&cFailed to reload homeset config. Check server logs."
+  home_not_found: "&cNo home named '{home_name}' was found."
+  home_world_unavailable: "&cHome '{home_name}' points to an unavailable world."
+  home_delay_started: "&eTeleporting to home '{home_name}' in {delay_seconds}s."
+  home_delay_cancelled_moved: "&cHome teleport cancelled because you moved."
+  home_teleport_success: "&aTeleported to home '{home_name}'."
+  home_teleport_failed: "&cCould not teleport to home '{home_name}'."
+  home_damage_cooldown: "&cYou cannot use /home for {cooldown_seconds}s after taking damage. Wait {remaining_seconds}s."
+  home_db_error: "&cFailed to load your home due to a database error."
+  delhome_success: "&aDeleted home '{home_name}'."
+  delhome_db_error: "&cFailed to delete your home due to a database error."
+  homes_empty: "&eYou do not have any homes yet. Use /sethome [name]."
+  homes_list: "&aHomes: {homes}"
+  homes_db_error: "&cFailed to list your homes due to a database error."
