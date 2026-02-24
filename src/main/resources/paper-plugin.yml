@@ -12,3 +12,6 @@ permissions:
   homeset.delhome:
     description: Allows using /delhome.
     default: true
+  homeset.reload:
+    description: Allows using /homesetreload.
+    default: op
