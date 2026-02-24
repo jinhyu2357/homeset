@@ -1,0 +1,14 @@
+name: homeset
+version: '${version}'
+main: org.example.jinhhyu.homeset.Homeset
+api-version: '1.21'
+permissions:
+  homeset.use:
+    description: Allows using /home and /homes.
+    default: true
+  homeset.sethome:
+    description: Allows using /sethome.
+    default: true
+  homeset.delhome:
+    description: Allows using /delhome.
+    default: true
