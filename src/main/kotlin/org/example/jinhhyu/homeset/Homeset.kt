@@ -31,10 +31,10 @@ class Homeset : JavaPlugin() {
         val commandHandler = HomeCommandHandler(this, homeRepository, homeDamageCooldownTracker)
         server.pluginManager.registerEvents(commandHandler, this)
         try {
-            registerPaperCommand("sethome", "Set or update one of your homes.", "homeset.sethome", commandHandler)
-            registerPaperCommand("home", "Teleport to one of your homes.", "homeset.use", commandHandler)
+            registerPaperCommand("sethome", "Set home with visibility option: share or personal.", "homeset.sethome", commandHandler)
+            registerPaperCommand("home", "Teleport to your home or update shared-home status.", "homeset.use", commandHandler)
             registerPaperCommand("delhome", "Delete one of your homes.", "homeset.delhome", commandHandler)
-            registerPaperCommand("homes", "List your saved homes.", "homeset.use", commandHandler)
+            registerPaperCommand("homes", "View personal or shared home lists.", "homeset.use", commandHandler)
             registerPaperCommand("homesetreload", "Reload the homeset config file.", "homeset.reload", commandHandler)
         } catch (exception: Exception) {
             logger.log(Level.SEVERE, "Could not register plugin commands.", exception)

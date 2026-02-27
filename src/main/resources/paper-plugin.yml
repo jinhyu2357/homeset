@@ -6,8 +6,11 @@ permissions:
   homeset.use:
     description: Allows using /home and /homes.
     default: true
+  homeset.share:
+    description: Allows using /sethome <name> share and managing /home <name> <registered|unregistered>.
+    default: op
   homeset.sethome:
-    description: Allows using /sethome.
+    description: Allows using /sethome <name> <share|personal>.
     default: true
   homeset.delhome:
     description: Allows using /delhome.

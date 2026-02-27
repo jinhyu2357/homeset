@@ -3,9 +3,12 @@
 #   settings.home_damage_cooldown_seconds - seconds after taking damage where /home is blocked (0 disables)
 #   settings.home_teleport_delay_seconds - seconds before /home teleports (0 disables delay)
 #   settings.max_homes_per_player - max homes per player (0 disables limit)
+#   settings.shared_home_manage_permission - permission required for /sethome <name> share and /home <name> <registered|unregistered>
+#     If set to "homeset.share", permission is determined by OP status.
 # Placeholders:
 #   {home_name} - the home name used in the command
 #   {homes} - comma-separated list of saved home names
+#   {permission} - required permission node for shared-home management
 #   {cooldown_seconds} - configured /home damage cooldown seconds
 #   {remaining_seconds} - seconds left before /home can be used
 #   {delay_seconds} - configured /home delay seconds
@@ -14,22 +17,34 @@ settings:
   home_damage_cooldown_seconds: 5
   home_teleport_delay_seconds: 3
   max_homes_per_player: 3
+  shared_home_manage_permission: "homeset.share"
 
 messages:
   only_players: "&cOnly players can use this command."
-  usage_sethome: "&eUsage: /sethome [name]"
-  usage_home: "&eUsage: /home [name]"
+  usage_sethome: "&eUsage: /sethome [name] [share|personal] (default: personal)"
+  usage_home: "&eUsage: /home [name] or /home <name> [registered|unregistered] (default: unregistered)"
   usage_delhome: "&eUsage: /delhome [name]"
-  usage_homes: "&eUsage: /homes"
+  usage_homes: "&eUsage: /homes [share|personal] (default: personal)"
   usage_homesetreload: "&eUsage: /homesetreload"
   invalid_home_name: "&cInvalid home name."
   invalid_home_name_detailed: "&cHome name must be 1-32 characters: letters, numbers, _ or -."
+  invalid_sethome_option: "&cSetHome option must be 'share' or 'personal'."
+  invalid_shared_flag: "&cUse 'registered' or 'unregistered' for shared-list status."
+  invalid_homes_view_mode: "&cUse /homes [share|personal]."
   sethome_limit_reached: "&cYou can only have up to {max_homes} homes."
-  sethome_success: "&aHome '{home_name}' has been saved."
+  sethome_success_shared: "&aHome '{home_name}' has been saved to the shared list."
+  sethome_success_private: "&aHome '{home_name}' has been saved to your private list."
+  sethome_shared_permission_denied: "&cYou need '{permission}' to use /sethome option 'share'."
   sethome_db_error: "&cFailed to save your home due to a database error."
   reload_success: "&aHomeset config has been reloaded."
   reload_failed: "&cFailed to reload homeset config. Check server logs."
   home_not_found: "&cNo home named '{home_name}' was found."
+  shared_home_not_found: "&cNo shared home named '{home_name}' was found."
+  home_share_permission_denied: "&cYou need '{permission}'. Your home was unregistered from the shared list."
+  home_share_added: "&aHome '{home_name}' was added to the shared list."
+  home_share_removed: "&aHome '{home_name}' was removed from the shared list."
+  home_share_name_taken: "&cAnother player already shares the name '{home_name}'."
+  home_share_db_error: "&cFailed to update shared-home state due to a database error."
   home_world_unavailable: "&cHome '{home_name}' points to an unavailable world."
   home_delay_started: "&eTeleporting to home '{home_name}' in {delay_seconds}s."
   home_delay_cancelled_moved: "&cHome teleport cancelled because you moved."
@@ -39,6 +54,8 @@ messages:
   home_db_error: "&cFailed to load your home due to a database error."
   delhome_success: "&aDeleted home '{home_name}'."
   delhome_db_error: "&cFailed to delete your home due to a database error."
-  homes_empty: "&eYou do not have any homes yet. Use /sethome [name]."
-  homes_list: "&aHomes: {homes}"
+  homes_empty: "&eYou do not have any homes yet. Use /sethome [name] [personal]."
+  homes_list: "&aYour homes: {homes}"
+  shared_homes_empty: "&eThere are no shared homes yet."
+  shared_homes_list: "&bShared homes: {homes}"
   homes_db_error: "&cFailed to list your homes due to a database error."
