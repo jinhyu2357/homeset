@@ -39,8 +39,8 @@ class HomeCommandHandler(
 
     private val defaultHomeName = "default"
     private val homeNamePattern = Regex("^[A-Za-z0-9_-]{1,32}$")
-    private val shareRegisteredValues = setOf("true", "yes", "y", "1", "on", "registered", "share", "shared")
-    private val shareUnregisteredValues = setOf("false", "no", "n", "0", "off", "unregistered", "unshare")
+    private val shareValues = setOf("true", "yes", "y", "1", "on", "share", "shared")
+    private val unshareValues = setOf("false", "no", "n", "0", "off", "unshare")
     private val pendingHomeTeleports = mutableMapOf<UUID, PendingHomeTeleport>()
     private val legacyAmpersandSerializer = LegacyComponentSerializer.legacyAmpersand()
 
@@ -277,7 +277,7 @@ class HomeCommandHandler(
                 return true
             }
 
-            // Default option is "unregistered" when the provided option is not recognized.
+            // Default option is "unshare" when the provided option is not recognized.
             val shouldShare = parseShareFlag(args[1]) ?: false
             if (shouldShare && homeRepository.isSharedHomeNameTakenByAnotherPlayer(player.uniqueId, homeName)) {
                 sendConfiguredMessage(player, "home_share_name_taken", mapOf("home_name" to homeName))
@@ -432,8 +432,8 @@ class HomeCommandHandler(
     private fun parseShareFlag(rawValue: String): Boolean? {
         val normalized = rawValue.lowercase(Locale.ROOT)
         return when {
-            normalized in shareRegisteredValues -> true
-            normalized in shareUnregisteredValues -> false
+            normalized in shareValues -> true
+            normalized in unshareValues -> false
             else -> null
         }
     }
@@ -457,7 +457,7 @@ class HomeCommandHandler(
 
     private fun suggestShareStates(rawPrefix: String): List<String> {
         val prefix = rawPrefix.lowercase(Locale.ROOT)
-        return listOf("registered", "unregistered").filter { it.startsWith(prefix) }
+        return listOf("share", "unshare").filter { it.startsWith(prefix) }
     }
 
     private fun parseHomesViewMode(rawValue: String): HomesViewMode? {

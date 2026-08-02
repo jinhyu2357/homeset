@@ -16,9 +16,9 @@
   - 이름을 생략하면 `default`를 사용합니다.
   - 개인 집이 우선이며, 개인 집이 없으면 공유 집에서 찾습니다.
 
-- `/home <이름> [registered|unregistered]`(op전용)
+- `/home <이름> [share|unshare]`(op전용)
   - 본인 집의 공유 상태를 변경합니다.
-  - `registered`는 공유 등록, `unregistered`는 공유 해제입니다. (기본값: `null`)
+  - `share`는 공유, `unshare`는 공유 해제입니다. (기본값: `null`)
 
 - `/delhome [이름]`
   - 저장된 집 정보를 삭제합니다.
