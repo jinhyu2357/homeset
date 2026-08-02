@@ -1,7 +1,7 @@
 name: homeset
 version: '${version}'
 main: org.example.jinhhyu.homeset.Homeset
-api-version: '1.21'
+api-version: '26.2'
 permissions:
   homeset.use:
     description: Allows using /home and /homes.

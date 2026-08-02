@@ -4,8 +4,9 @@ import java.sql.SQLException
 import java.util.Locale
 import java.util.UUID
 import java.util.logging.Level
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
-import org.bukkit.ChatColor
 import org.bukkit.Location
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
@@ -41,6 +42,7 @@ class HomeCommandHandler(
     private val shareRegisteredValues = setOf("true", "yes", "y", "1", "on", "registered", "share", "shared")
     private val shareUnregisteredValues = setOf("false", "no", "n", "0", "off", "unregistered", "unshare")
     private val pendingHomeTeleports = mutableMapOf<UUID, PendingHomeTeleport>()
+    private val legacyAmpersandSerializer = LegacyComponentSerializer.legacyAmpersand()
 
     fun executeCommand(
         sender: CommandSender,
@@ -544,7 +546,7 @@ class HomeCommandHandler(
     @EventHandler(ignoreCancelled = true)
     fun onPlayerMove(event: PlayerMoveEvent) {
         val pendingTeleport = pendingHomeTeleports[event.player.uniqueId] ?: return
-        val toLocation = event.to ?: return
+        val toLocation = event.to
         if (!hasMovedBlocks(pendingTeleport.startLocation, toLocation)) {
             return
         }
@@ -597,12 +599,12 @@ class HomeCommandHandler(
     private fun resolveMessage(
         key: String,
         placeholders: Map<String, String> = emptyMap()
-    ): String {
+    ): Component {
         val template = plugin.config.getString("messages.$key") ?: key
         val interpolated = placeholders.entries.fold(template) { message, (placeholder, value) ->
             message.replace("{$placeholder}", value)
         }
-        return ChatColor.translateAlternateColorCodes('&', interpolated)
+        return legacyAmpersandSerializer.deserialize(interpolated)
     }
 
     private fun normalizeHomeName(name: String): String = name.lowercase(Locale.ROOT)
