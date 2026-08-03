@@ -1,4 +1,4 @@
-# sethome
+# SetHome
 
 `sethome`은 Paper 서버에서 플레이어의 집 좌표를 저장/이동/삭제/공유할 수 있도록 만든 Kotlin 기반 플러그인입니다.
 
