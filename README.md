@@ -1,26 +1,24 @@
-# homeset 1.21.11
+# sethome
 
-`homeset`은 Paper 1.21 서버에서 플레이어의 집 좌표를 저장/이동/삭제/공유할 수 있도록 만든 Kotlin 기반 플러그인입니다.
+`sethome`은 Paper 서버에서 플레이어의 집 좌표를 저장/이동/삭제/공유할 수 있도록 만든 Kotlin 기반 플러그인입니다.
 
 ## 명령어 사용방법과 설명
 
-플러그인이 활성화되면 아래 명령어를 사용할 수 있습니다.
-
-- `/sethome [이름] [share|personal]`
+- `/sethome [name] [share|personal]`
   - 현재 위치를 집으로 저장하거나 기존 집 좌표를 갱신합니다.
   - 이름을 생략하면 `default`를 사용합니다.
   - `share`를 사용하면 공유 집으로 등록(op전용), `personal`은 개인 집으로 저장합니다. (기본값: `personal`)
 
-- `/home [이름]`
+- `/home [name]`
   - 저장된 집으로 텔레포트합니다.
   - 이름을 생략하면 `default`를 사용합니다.
   - 개인 집이 우선이며, 개인 집이 없으면 공유 집에서 찾습니다.
 
-- `/home <이름> [registered|unregistered]`(op전용)
+- `/home [name] [share|unshare]` (op전용)
   - 본인 집의 공유 상태를 변경합니다.
-  - `registered`는 공유 등록, `unregistered`는 공유 해제입니다. (기본값: `null`)
+  - `share`는 공유 등록, `unshare`는 공유 해제입니다. (기본값: `null`)
 
-- `/delhome [이름]`
+- `/delhome [name]`
   - 저장된 집 정보를 삭제합니다.
   - 이름을 생략하면 `default`를 삭제합니다.
 
@@ -29,7 +27,7 @@
   - `personal`은 본인 집 목록, `share`는 공유 집 목록을 표시합니다. (기본값: `personal`)
 
 - `/homesetreload`(op전용)
-  - 플러그인 설정(`config.yml`)을 다시 불러옵니다.
+  - `config.yml`을 다시 불러옵니다.
 
 ## `config.yml` 파일 위치
 
