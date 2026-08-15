@@ -25,8 +25,9 @@
   - 이름을 생략하면 `default`를 삭제합니다.
 
 - `/homes [share|personal]`
-  - 저장된 집 목록을 확인합니다.
-  - `personal`은 본인 집 목록, `share`는 공유 집 목록을 표시합니다. (기본값: `personal`)
+  - `/homes` 또는 `/homes personal`은 개인 집 관리 GUI를 엽니다.
+  - GUI에서 집 좌표를 확인하고 텔레포트하거나 삭제할 수 있습니다.
+  - `/homes share`는 공유 집 목록을 채팅에 표시합니다.
 
 - `/homesetreload`(op전용)
   - 플러그인 설정(`config.yml`)을 다시 불러옵니다.

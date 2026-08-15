@@ -30,6 +30,7 @@ class Homeset : JavaPlugin() {
         server.pluginManager.registerEvents(homeDamageCooldownTracker, this)
         val commandHandler = HomeCommandHandler(this, homeRepository, homeDamageCooldownTracker)
         server.pluginManager.registerEvents(commandHandler, this)
+        server.pluginManager.registerEvents(commandHandler.homesGui, this)
         try {
             registerPaperCommand("sethome", "Set home with visibility option: share or personal.", "homeset.sethome", commandHandler)
             registerPaperCommand("home", "Teleport to your home or update shared-home status.", "homeset.use", commandHandler)

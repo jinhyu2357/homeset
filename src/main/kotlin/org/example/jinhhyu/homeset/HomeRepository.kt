@@ -3,6 +3,7 @@ package org.example.jinhhyu.homeset
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.UUID
 import org.bukkit.Location
@@ -14,6 +15,11 @@ data class HomeRecord(
     val z: Double,
     val yaw: Float,
     val pitch: Float
+)
+
+data class HomeListEntry(
+    val name: String,
+    val home: HomeRecord
 )
 
 class HomeRepository private constructor(private val connection: Connection) {
@@ -138,14 +144,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -166,14 +165,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -195,14 +187,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -229,10 +214,10 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun listPersonalHomes(playerId: UUID): List<String> {
+    fun listPersonalHomeRecords(playerId: UUID): List<HomeListEntry> {
         connection.prepareStatement(
             """
-            SELECT home_name
+            SELECT home_name, world_name, x, y, z, yaw, pitch
             FROM homes
             WHERE player_uuid = ? AND is_shared = 0
             ORDER BY home_name COLLATE NOCASE;
@@ -240,9 +225,12 @@ class HomeRepository private constructor(private val connection: Connection) {
         ).use { statement ->
             statement.setString(1, playerId.toString())
             statement.executeQuery().use { resultSet ->
-                val homes = mutableListOf<String>()
+                val homes = mutableListOf<HomeListEntry>()
                 while (resultSet.next()) {
-                    homes += resultSet.getString("home_name")
+                    homes += HomeListEntry(
+                        name = resultSet.getString("home_name"),
+                        home = resultSet.toHomeRecord()
+                    )
                 }
                 return homes
             }
@@ -345,3 +333,12 @@ class HomeRepository private constructor(private val connection: Connection) {
         }
     }
 }
+
+private fun ResultSet.toHomeRecord(): HomeRecord = HomeRecord(
+    worldName = getString("world_name"),
+    x = getDouble("x"),
+    y = getDouble("y"),
+    z = getDouble("z"),
+    yaw = getFloat("yaw"),
+    pitch = getFloat("pitch")
+)
