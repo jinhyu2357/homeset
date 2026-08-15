@@ -2,7 +2,7 @@
 # Settings:
 #   settings.home_damage_cooldown_seconds - seconds after taking damage where /home is blocked (0 disables)
 #   settings.home_teleport_delay_seconds - seconds before /home teleports (0 disables delay)
-#   settings.max_homes_per_player - max homes per player (0 disables limit)
+#   settings.max_homes_per_player - max personal homes per player (shared homes do not count; 0 disables limit)
 #   settings.shared_home_manage_permission - permission required for /sethome <name> share and /home <name> <share|unshare>
 #     If set to "homeset.share", permission is determined by OP status.
 # Placeholders:
@@ -12,7 +12,7 @@
 #   {cooldown_seconds} - configured /home damage cooldown seconds
 #   {remaining_seconds} - seconds left before /home can be used
 #   {delay_seconds} - configured /home delay seconds
-#   {max_homes} - configured max number of homes per player
+#   {max_homes} - configured max number of personal homes per player
 settings:
   home_damage_cooldown_seconds: 5
   home_teleport_delay_seconds: 3
@@ -29,9 +29,8 @@ messages:
   invalid_home_name: "&cInvalid home name."
   invalid_home_name_detailed: "&cHome name must be 1-32 characters: letters, numbers, _ or -."
   invalid_sethome_option: "&cSetHome option must be 'share' or 'personal'."
-  invalid_shared_flag: "&cUse 'share' or 'unshare' for shared-list status."
   invalid_homes_view_mode: "&cUse /homes [share|personal]."
-  sethome_limit_reached: "&cYou can only have up to {max_homes} homes."
+  sethome_limit_reached: "&cYou can only have up to {max_homes} personal homes."
   sethome_success_shared: "&aHome '{home_name}' has been saved to the shared list."
   sethome_success_private: "&aHome '{home_name}' has been saved to your private list."
   sethome_shared_permission_denied: "&cYou need '{permission}' to use /sethome option 'share'."
@@ -39,7 +38,6 @@ messages:
   reload_success: "&aHomeset config has been reloaded."
   reload_failed: "&cFailed to reload homeset config. Check server logs."
   home_not_found: "&cNo home named '{home_name}' was found."
-  shared_home_not_found: "&cNo shared home named '{home_name}' was found."
   home_share_permission_denied: "&cYou need '{permission}'. Your home was unshared from the shared list."
   home_share_added: "&aHome '{home_name}' was added to the shared list."
   home_share_removed: "&aHome '{home_name}' was removed from the shared list."

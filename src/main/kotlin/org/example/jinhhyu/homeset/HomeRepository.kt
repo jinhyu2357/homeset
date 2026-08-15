@@ -75,19 +75,20 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun saveHome(playerId: UUID, homeName: String, location: Location) {
+    fun saveHome(playerId: UUID, homeName: String, location: Location, shared: Boolean) {
         val world = location.world ?: throw IllegalArgumentException("Cannot save home without world.")
         connection.prepareStatement(
             """
             INSERT INTO homes (player_uuid, home_name, world_name, x, y, z, yaw, pitch, is_shared)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_uuid, home_name) DO UPDATE SET
                 world_name = excluded.world_name,
                 x = excluded.x,
                 y = excluded.y,
                 z = excluded.z,
                 yaw = excluded.yaw,
-                pitch = excluded.pitch;
+                pitch = excluded.pitch,
+                is_shared = excluded.is_shared;
             """.trimIndent()
         ).use { statement ->
             statement.setString(1, playerId.toString())
@@ -98,7 +99,26 @@ class HomeRepository private constructor(private val connection: Connection) {
             statement.setDouble(6, location.z)
             statement.setFloat(7, location.yaw)
             statement.setFloat(8, location.pitch)
+            statement.setInt(9, if (shared) 1 else 0)
             statement.executeUpdate()
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun getPersonalHomeUsage(playerId: UUID, homeName: String): Pair<Int, Boolean> {
+        connection.prepareStatement(
+            """
+            SELECT COUNT(*), COUNT(CASE WHEN home_name = ? THEN 1 END)
+            FROM homes
+            WHERE player_uuid = ? AND is_shared = 0;
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, homeName)
+            statement.setString(2, playerId.toString())
+            statement.executeQuery().use { resultSet ->
+                resultSet.next()
+                return resultSet.getInt(1) to (resultSet.getInt(2) > 0)
+            }
         }
     }
 

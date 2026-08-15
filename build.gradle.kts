@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "org.example.jinhhyu"
-version = "1.0"
+version = "1.2"
 
 repositories {
     mavenCentral()
@@ -21,6 +21,8 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:26.2.build.84-stable")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
     implementation("org.xerial:sqlite-jdbc:3.45.3.0")
+    testImplementation(kotlin("test-junit5"))
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks {
@@ -36,6 +38,10 @@ kotlin {
 
 tasks.build {
     dependsOn("shadowJar")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.named<Jar>("shadowJar") {

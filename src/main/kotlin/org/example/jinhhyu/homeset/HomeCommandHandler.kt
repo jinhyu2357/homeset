@@ -17,6 +17,19 @@ import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
 
+internal fun wouldExceedPersonalHomeLimit(
+    maxHomesPerPlayer: Int,
+    personalHomeCount: Int,
+    homeAlreadyPersonal: Boolean,
+    visibilityOptionIsShared: Boolean
+): Boolean {
+    if (maxHomesPerPlayer <= 0 || visibilityOptionIsShared) {
+        return false
+    }
+
+    return !homeAlreadyPersonal && personalHomeCount >= maxHomesPerPlayer
+}
+
 class HomeCommandHandler(
     private val plugin: JavaPlugin,
     private val homeRepository: HomeRepository,
@@ -165,16 +178,26 @@ class HomeCommandHandler(
 
         return try {
             val maxHomesPerPlayer = getMaxHomesPerPlayer()
-            if (maxHomesPerPlayer > 0) {
-                val existingHomes = homeRepository.listHomes(player.uniqueId)
-                if (homeName !in existingHomes && existingHomes.size >= maxHomesPerPlayer) {
-                    sendConfiguredMessage(
-                        player,
-                        "sethome_limit_reached",
-                        mapOf("max_homes" to maxHomesPerPlayer.toString())
-                    )
-                    return true
-                }
+            val visibilityOptionIsShared = visibilityOption == SetHomeVisibilityOption.SHARED
+            val personalHomeUsage = if (maxHomesPerPlayer > 0 && !visibilityOptionIsShared) {
+                homeRepository.getPersonalHomeUsage(player.uniqueId, homeName)
+            } else {
+                null
+            }
+            if (
+                wouldExceedPersonalHomeLimit(
+                    maxHomesPerPlayer = maxHomesPerPlayer,
+                    personalHomeCount = personalHomeUsage?.first ?: 0,
+                    homeAlreadyPersonal = personalHomeUsage?.second == true,
+                    visibilityOptionIsShared = visibilityOptionIsShared
+                )
+            ) {
+                sendConfiguredMessage(
+                    player,
+                    "sethome_limit_reached",
+                    mapOf("max_homes" to maxHomesPerPlayer.toString())
+                )
+                return true
             }
 
             if (
@@ -185,9 +208,8 @@ class HomeCommandHandler(
                 return true
             }
 
-            homeRepository.saveHome(player.uniqueId, homeName, player.location)
             val shouldShare = visibilityOption == SetHomeVisibilityOption.SHARED
-            homeRepository.setHomeShared(player.uniqueId, homeName, shouldShare)
+            homeRepository.saveHome(player.uniqueId, homeName, player.location, shouldShare)
             val successMessageKey = if (shouldShare) "sethome_success_shared" else "sethome_success_private"
             sendConfiguredMessage(player, successMessageKey, mapOf("home_name" to homeName))
             true
