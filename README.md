@@ -27,7 +27,7 @@
 - `/homes [share|personal]`
   - `/homes` 또는 `/homes personal`은 개인 집 관리 GUI를 엽니다.
   - GUI에서 집 좌표를 확인하고 텔레포트하거나 삭제할 수 있습니다.
-  - `/homes share`는 공유 집 목록을 채팅에 표시합니다.
+  - GUI의 버튼 또는 `/homes share`로 별도의 공유 집 페이지를 엽니다. 공유 집 관리 권한이 있는 관리자는 흰색 침대 버튼으로 좌표를 갱신하거나 용암 양동이 버튼으로 공유 집을 삭제할 수 있습니다.
 
 - `/homesetreload`(op전용)
   - 플러그인 설정(`config.yml`)을 다시 불러옵니다.

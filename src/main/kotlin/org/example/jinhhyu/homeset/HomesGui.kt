@@ -24,15 +24,28 @@ internal const val HOMES_PER_PAGE = 5
 internal fun homesPageCount(homeCount: Int): Int =
     if (homeCount <= 0) 1 else (homeCount - 1) / HOMES_PER_PAGE + 1
 
+enum class HomesViewMode(
+    val title: String,
+    val allowsDeletion: Boolean,
+    val allowsSharedManagement: Boolean
+) {
+    PERSONAL("Private Homes", true, false),
+    SHARED("Shared Homes", false, true)
+}
+
 class HomesGui(
     private val plugin: JavaPlugin,
-    private val onTeleport: (Player, String) -> Unit,
-    private val onDeleteConfirmed: (Player, String, Int) -> Unit
+    private val onTeleport: (Player, String, HomesViewMode) -> Unit,
+    private val onDeleteConfirmed: (Player, String, Int, HomesViewMode) -> Unit,
+    private val onSharedHomeUpdateConfirmed: (Player, String, Int) -> Unit,
+    private val canManageSharedHomes: (Player) -> Boolean,
+    private val onViewChanged: (Player, HomesViewMode) -> Unit
 ) : Listener {
     private companion object {
         const val INVENTORY_SIZE = 54
         const val PREVIOUS_SLOT = 45
         const val PAGE_SLOT = 49
+        const val VIEW_SLOT = 51
         const val NEXT_SLOT = 53
     }
 
@@ -42,8 +55,13 @@ class HomesGui(
         DELETE,
         PREVIOUS,
         NEXT,
+        VIEW_PERSONAL,
+        VIEW_SHARED,
+        UPDATE_SHARED,
         CONFIRM_DELETE,
-        CANCEL_DELETE
+        CANCEL_DELETE,
+        CONFIRM_SHARED_UPDATE,
+        CANCEL_SHARED_UPDATE
     }
 
     private sealed class GuiHolder(val ownerId: UUID) : InventoryHolder {
@@ -55,10 +73,19 @@ class HomesGui(
     private class HomesHolder(
         ownerId: UUID,
         val homes: List<HomeListEntry>,
+        val viewMode: HomesViewMode,
         val page: Int
     ) : GuiHolder(ownerId)
 
     private class DeleteHolder(
+        ownerId: UUID,
+        val homes: List<HomeListEntry>,
+        val homeName: String,
+        val page: Int,
+        val viewMode: HomesViewMode
+    ) : GuiHolder(ownerId)
+
+    private class SharedUpdateHolder(
         ownerId: UUID,
         val homes: List<HomeListEntry>,
         val homeName: String,
@@ -69,25 +96,35 @@ class HomesGui(
     private val homeNameKey = NamespacedKey(plugin, "homes_gui_home")
     private val pageKey = NamespacedKey(plugin, "homes_gui_page")
 
-    fun open(player: Player, homes: List<HomeListEntry>, requestedPage: Int = 0) {
+    fun open(
+        player: Player,
+        homes: List<HomeListEntry>,
+        viewMode: HomesViewMode = HomesViewMode.PERSONAL,
+        requestedPage: Int = 0
+    ) {
         val pageCount = homesPageCount(homes.size)
         val page = requestedPage.coerceIn(0, pageCount - 1)
-        val holder = HomesHolder(player.uniqueId, homes, page)
+        val holder = HomesHolder(player.uniqueId, homes, viewMode, page)
         val inventory = Bukkit.createInventory(
             holder,
             INVENTORY_SIZE,
-            uiText("Homes · ${page + 1}/$pageCount", NamedTextColor.DARK_GREEN)
+            uiText("${viewMode.title} · ${page + 1}/$pageCount", NamedTextColor.DARK_GREEN)
         )
         holder.backingInventory = inventory
 
         val firstHomeIndex = page * HOMES_PER_PAGE
         homes.subList(firstHomeIndex, minOf(firstHomeIndex + HOMES_PER_PAGE, homes.size))
-            .forEachIndexed { row, entry -> addHomeRow(inventory, row, entry) }
+            .forEachIndexed { row, entry -> addHomeRow(player, inventory, row, entry, viewMode) }
 
         if (homes.isEmpty()) {
             inventory.setItem(
                 22,
-                guiItem(Material.BARRIER, "No saved homes", NamedTextColor.GRAY, action = Action.INFO)
+                guiItem(
+                    Material.BARRIER,
+                    if (viewMode == HomesViewMode.SHARED) "No shared homes" else "No private homes",
+                    NamedTextColor.GRAY,
+                    action = Action.INFO
+                )
             )
         }
         if (page > 0) {
@@ -109,6 +146,16 @@ class HomesGui(
                 "Page ${page + 1} / $pageCount",
                 NamedTextColor.GOLD,
                 action = Action.INFO
+            )
+        )
+        val targetView = if (viewMode == HomesViewMode.PERSONAL) HomesViewMode.SHARED else HomesViewMode.PERSONAL
+        inventory.setItem(
+            VIEW_SLOT,
+            guiItem(
+                if (targetView == HomesViewMode.SHARED) Material.ENDER_CHEST else Material.WHITE_BED,
+                "View ${targetView.title}",
+                NamedTextColor.AQUA,
+                action = if (targetView == HomesViewMode.SHARED) Action.VIEW_SHARED else Action.VIEW_PERSONAL
             )
         )
         if (page + 1 < pageCount) {
@@ -155,6 +202,12 @@ class HomesGui(
                 action,
                 data.get(homeNameKey, PersistentDataType.STRING)
             )
+            is SharedUpdateHolder -> handleSharedUpdateClick(
+                player,
+                holder,
+                action,
+                data.get(homeNameKey, PersistentDataType.STRING)
+            )
         }
     }
 
@@ -165,13 +218,19 @@ class HomesGui(
         }
     }
 
-    private fun addHomeRow(inventory: Inventory, row: Int, entry: HomeListEntry) {
+    private fun addHomeRow(
+        player: Player,
+        inventory: Inventory,
+        row: Int,
+        entry: HomeListEntry,
+        viewMode: HomesViewMode
+    ) {
         val firstSlot = row * 9
         val home = entry.home
         inventory.setItem(
             firstSlot,
             guiItem(
-                Material.WHITE_BED,
+                if (viewMode == HomesViewMode.SHARED) Material.CYAN_BED else Material.WHITE_BED,
                 entry.name,
                 NamedTextColor.GOLD,
                 listOf(
@@ -195,17 +254,42 @@ class HomesGui(
                 entry.name
             )
         )
-        inventory.setItem(
-            firstSlot + 8,
-            guiItem(
-                Material.LAVA_BUCKET,
-                "Delete Home",
-                NamedTextColor.RED,
-                listOf("Delete ${entry.name}"),
-                Action.DELETE,
-                entry.name
+        if (viewMode.allowsDeletion) {
+            inventory.setItem(
+                firstSlot + 8,
+                guiItem(
+                    Material.LAVA_BUCKET,
+                    "Delete Home",
+                    NamedTextColor.RED,
+                    listOf("Delete ${entry.name}"),
+                    Action.DELETE,
+                    entry.name
+                )
             )
-        )
+        } else if (viewMode.allowsSharedManagement && canManageSharedHomes(player)) {
+            inventory.setItem(
+                firstSlot + 6,
+                guiItem(
+                    Material.LAVA_BUCKET,
+                    "Delete Shared Home",
+                    NamedTextColor.RED,
+                    listOf("Delete ${entry.name}"),
+                    Action.DELETE,
+                    entry.name
+                )
+            )
+            inventory.setItem(
+                firstSlot + 8,
+                guiItem(
+                    Material.WHITE_BED,
+                    "Update Shared Home",
+                    NamedTextColor.AQUA,
+                    listOf("Set ${entry.name} to your current location"),
+                    Action.UPDATE_SHARED,
+                    entry.name
+                )
+            )
+        }
     }
 
     private fun handleHomesClick(
@@ -217,19 +301,51 @@ class HomesGui(
     ) {
         when (action) {
             Action.TELEPORT -> {
-                if (!holder.contains(homeName)) return
+                if (holder.find(homeName) == null) return
                 nextTick(player) {
                     player.closeInventory()
-                    onTeleport(player, homeName!!)
+                    onTeleport(player, homeName!!, holder.viewMode)
                 }
             }
             Action.DELETE -> {
-                if (!holder.contains(homeName)) return
+                if (
+                    (!holder.viewMode.allowsDeletion &&
+                        !(holder.viewMode.allowsSharedManagement && canManageSharedHomes(player))) ||
+                    holder.find(homeName) == null
+                ) return
                 nextTick(player) { openDeleteConfirmation(player, holder, homeName!!) }
+            }
+            Action.UPDATE_SHARED -> {
+                if (
+                    !holder.viewMode.allowsSharedManagement ||
+                    !canManageSharedHomes(player) ||
+                    holder.find(homeName) == null
+                ) return
+                nextTick(player) { openSharedUpdateConfirmation(player, holder, homeName!!) }
             }
             Action.PREVIOUS, Action.NEXT -> {
                 if (targetPage == null || targetPage !in 0 until homesPageCount(holder.homes.size)) return
-                nextTick(player) { open(player, holder.homes, targetPage) }
+                nextTick(player) { open(player, holder.homes, holder.viewMode, targetPage) }
+            }
+            Action.VIEW_PERSONAL -> nextTick(player) { onViewChanged(player, HomesViewMode.PERSONAL) }
+            Action.VIEW_SHARED -> nextTick(player) { onViewChanged(player, HomesViewMode.SHARED) }
+            else -> Unit
+        }
+    }
+
+    private fun handleSharedUpdateClick(
+        player: Player,
+        holder: SharedUpdateHolder,
+        action: Action,
+        taggedHomeName: String?
+    ) {
+        when (action) {
+            Action.CONFIRM_SHARED_UPDATE -> {
+                if (taggedHomeName != holder.homeName) return
+                nextTick(player) { onSharedHomeUpdateConfirmed(player, holder.homeName, holder.page) }
+            }
+            Action.CANCEL_SHARED_UPDATE -> nextTick(player) {
+                open(player, holder.homes, HomesViewMode.SHARED, holder.page)
             }
             else -> Unit
         }
@@ -244,15 +360,25 @@ class HomesGui(
         when (action) {
             Action.CONFIRM_DELETE -> {
                 if (taggedHomeName != holder.homeName) return
-                nextTick(player) { onDeleteConfirmed(player, holder.homeName, holder.page) }
+                nextTick(player) {
+                    onDeleteConfirmed(player, holder.homeName, holder.page, holder.viewMode)
+                }
             }
-            Action.CANCEL_DELETE -> nextTick(player) { open(player, holder.homes, holder.page) }
+            Action.CANCEL_DELETE -> nextTick(player) {
+                open(player, holder.homes, holder.viewMode, holder.page)
+            }
             else -> Unit
         }
     }
 
     private fun openDeleteConfirmation(player: Player, homesHolder: HomesHolder, homeName: String) {
-        val holder = DeleteHolder(player.uniqueId, homesHolder.homes, homeName, homesHolder.page)
+        val holder = DeleteHolder(
+            player.uniqueId,
+            homesHolder.homes,
+            homeName,
+            homesHolder.page,
+            homesHolder.viewMode
+        )
         val inventory = Bukkit.createInventory(
             holder,
             9,
@@ -283,6 +409,38 @@ class HomesGui(
         player.openInventory(inventory)
     }
 
+    private fun openSharedUpdateConfirmation(player: Player, homesHolder: HomesHolder, homeName: String) {
+        val holder = SharedUpdateHolder(player.uniqueId, homesHolder.homes, homeName, homesHolder.page)
+        val inventory = Bukkit.createInventory(
+            holder,
+            9,
+            uiText("Update \"$homeName\"?", NamedTextColor.DARK_AQUA)
+        )
+        holder.backingInventory = inventory
+        inventory.setItem(
+            2,
+            guiItem(
+                Material.WHITE_BED,
+                "Set Current Location",
+                NamedTextColor.GREEN,
+                listOf("Replace $homeName's saved location"),
+                Action.CONFIRM_SHARED_UPDATE,
+                homeName
+            )
+        )
+        inventory.setItem(
+            6,
+            guiItem(
+                Material.BARRIER,
+                "Cancel",
+                NamedTextColor.RED,
+                action = Action.CANCEL_SHARED_UPDATE,
+                homeName = homeName
+            )
+        )
+        player.openInventory(inventory)
+    }
+
     private fun guiItem(
         material: Material,
         name: String,
@@ -305,8 +463,8 @@ class HomesGui(
         return item
     }
 
-    private fun HomesHolder.contains(homeName: String?): Boolean =
-        homeName != null && homes.any { it.name == homeName }
+    private fun HomesHolder.find(homeName: String?): HomeListEntry? =
+        homes.firstOrNull { it.name == homeName }
 
     private fun nextTick(player: Player, action: () -> Unit) {
         plugin.server.scheduler.runTask(plugin, Runnable {

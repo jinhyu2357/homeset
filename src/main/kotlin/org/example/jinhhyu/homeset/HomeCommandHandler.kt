@@ -40,11 +40,6 @@ class HomeCommandHandler(
         PRIVATE
     }
 
-    private enum class HomesViewMode {
-        SHARED,
-        PERSONAL
-    }
-
     private data class PendingHomeTeleport(
         val task: BukkitTask,
         val startLocation: Location
@@ -58,11 +53,22 @@ class HomeCommandHandler(
     private val legacyAmpersandSerializer = LegacyComponentSerializer.legacyAmpersand()
     internal val homesGui = HomesGui(
         plugin = plugin,
-        onTeleport = { player, homeName -> handleHomeTeleport(player, arrayOf(homeName)) },
-        onDeleteConfirmed = { player, homeName, page ->
-            deleteHome(player, homeName)
-            openHomesGui(player, page)
-        }
+        onTeleport = { player, homeName, viewMode ->
+            handleHomeTeleport(player, arrayOf(homeName), viewMode)
+        },
+        onDeleteConfirmed = { player, homeName, page, viewMode ->
+            when (viewMode) {
+                HomesViewMode.PERSONAL -> deleteHome(player, homeName)
+                HomesViewMode.SHARED -> deleteSharedHome(player, homeName)
+            }
+            openHomesGui(player, page, viewMode)
+        },
+        onSharedHomeUpdateConfirmed = { player, homeName, page ->
+            updateSharedHomeLocation(player, homeName)
+            openHomesGui(player, page, HomesViewMode.SHARED)
+        },
+        canManageSharedHomes = ::hasSharedHomeManagePermission,
+        onViewChanged = { player, viewMode -> openHomesGui(player, viewMode = viewMode) }
     )
 
     fun executeCommand(
@@ -256,7 +262,11 @@ class HomeCommandHandler(
         }
     }
 
-    private fun handleHomeTeleport(player: Player, args: Array<out String>): Boolean {
+    private fun handleHomeTeleport(
+        player: Player,
+        args: Array<out String>,
+        viewMode: HomesViewMode? = null
+    ): Boolean {
         if (!canUseHomeTeleport(player)) {
             return true
         }
@@ -268,8 +278,12 @@ class HomeCommandHandler(
         }
 
         return try {
-            val home = homeRepository.findPersonalHome(player.uniqueId, homeName)
-                ?: homeRepository.findSharedHome(homeName)
+            val home = when (viewMode) {
+                HomesViewMode.PERSONAL -> homeRepository.findPersonalHome(player.uniqueId, homeName)
+                HomesViewMode.SHARED -> homeRepository.findSharedHome(homeName)
+                null -> homeRepository.findPersonalHome(player.uniqueId, homeName)
+                    ?: homeRepository.findSharedHome(homeName)
+            }
             if (home == null) {
                 sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
                 return true
@@ -355,6 +369,50 @@ class HomeCommandHandler(
         }
     }
 
+    private fun updateSharedHomeLocation(player: Player, homeName: String) {
+        if (!hasSharedHomeManagePermission(player)) {
+            sendConfiguredMessage(
+                player,
+                "shared_home_update_permission_denied",
+                mapOf("permission" to getSharedHomeManagePermissionDisplay())
+            )
+            return
+        }
+
+        try {
+            if (homeRepository.updateSharedHomeLocation(homeName, player.location)) {
+                sendConfiguredMessage(player, "shared_home_update_success", mapOf("home_name" to homeName))
+            } else {
+                sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
+            }
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to update shared home '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "shared_home_update_db_error")
+        }
+    }
+
+    private fun deleteSharedHome(player: Player, homeName: String) {
+        if (!hasSharedHomeManagePermission(player)) {
+            sendConfiguredMessage(
+                player,
+                "shared_home_delete_permission_denied",
+                mapOf("permission" to getSharedHomeManagePermissionDisplay())
+            )
+            return
+        }
+
+        try {
+            if (homeRepository.deleteSharedHome(homeName)) {
+                sendConfiguredMessage(player, "shared_home_delete_success", mapOf("home_name" to homeName))
+            } else {
+                sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
+            }
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to delete shared home '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "shared_home_delete_db_error")
+        }
+    }
+
     private fun handleHomesCommand(player: Player, args: Array<out String>): Boolean {
         if (args.isEmpty()) {
             return openHomesGui(player)
@@ -373,36 +431,24 @@ class HomeCommandHandler(
 
         return when (viewMode) {
             HomesViewMode.PERSONAL -> openHomesGui(player)
-            HomesViewMode.SHARED -> handleSharedHomesList(player)
+            HomesViewMode.SHARED -> openHomesGui(player, viewMode = HomesViewMode.SHARED)
         }
     }
 
-    private fun openHomesGui(player: Player, page: Int = 0): Boolean {
+    private fun openHomesGui(
+        player: Player,
+        page: Int = 0,
+        viewMode: HomesViewMode = HomesViewMode.PERSONAL
+    ): Boolean {
         return try {
-            homesGui.open(player, homeRepository.listPersonalHomeRecords(player.uniqueId), page)
-            true
-        } catch (exception: SQLException) {
-            plugin.logger.warning("Failed to list homes for ${player.uniqueId}: ${exception.message}")
-            sendConfiguredMessage(player, "homes_db_error")
-            true
-        }
-    }
-
-    private fun handleSharedHomesList(player: Player): Boolean {
-        return try {
-            val sharedHomes = homeRepository.listSharedHomes()
-            if (sharedHomes.isEmpty()) {
-                sendConfiguredMessage(player, "shared_homes_empty")
-            } else {
-                sendConfiguredMessage(
-                    player,
-                    "shared_homes_list",
-                    mapOf("homes" to sharedHomes.joinToString(", "))
-                )
+            val homes = when (viewMode) {
+                HomesViewMode.PERSONAL -> homeRepository.listPersonalHomeRecords(player.uniqueId)
+                HomesViewMode.SHARED -> homeRepository.listSharedHomeRecords()
             }
+            homesGui.open(player, homes, viewMode, page)
             true
         } catch (exception: SQLException) {
-            plugin.logger.warning("Failed to list shared homes: ${exception.message}")
+            plugin.logger.warning("Failed to list ${viewMode.name.lowercase()} homes: ${exception.message}")
             sendConfiguredMessage(player, "homes_db_error")
             true
         }
@@ -419,7 +465,7 @@ class HomeCommandHandler(
 
     private fun loadSharedHomesSafely(): List<String> {
         return try {
-            homeRepository.listSharedHomes()
+            homeRepository.listSharedHomeRecords().map(HomeListEntry::name)
         } catch (exception: SQLException) {
             plugin.logger.warning("Failed to load tab completion shared homes: ${exception.message}")
             emptyList()

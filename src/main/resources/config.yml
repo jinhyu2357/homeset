@@ -3,7 +3,7 @@
 #   settings.home_damage_cooldown_seconds - seconds after taking damage where /home is blocked (0 disables)
 #   settings.home_teleport_delay_seconds - seconds before /home teleports (0 disables delay)
 #   settings.max_homes_per_player - max personal homes per player (shared homes do not count; 0 disables limit)
-#   settings.shared_home_manage_permission - permission required for /sethome <name> share and /home <name> <share|unshare>
+#   settings.shared_home_manage_permission - permission required for shared-home commands and /homes GUI management
 #     If set to "homeset.share", permission is determined by OP status.
 # Placeholders:
 #   {home_name} - the home name used in the command
@@ -56,4 +56,10 @@ messages:
   homes_list: "&aYour homes: {homes}"
   shared_homes_empty: "&eThere are no shared homes yet."
   shared_homes_list: "&bShared homes: {homes}"
+  shared_home_update_success: "&aShared home '{home_name}' now points to your current location."
+  shared_home_update_permission_denied: "&cYou need '{permission}' to update shared homes."
+  shared_home_update_db_error: "&cFailed to update the shared home due to a database error."
+  shared_home_delete_success: "&aDeleted shared home '{home_name}'."
+  shared_home_delete_permission_denied: "&cYou need '{permission}' to delete shared homes."
+  shared_home_delete_db_error: "&cFailed to delete the shared home due to a database error."
   homes_db_error: "&cFailed to list your homes due to a database error."

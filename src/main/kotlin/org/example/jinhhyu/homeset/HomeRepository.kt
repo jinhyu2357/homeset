@@ -238,19 +238,28 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun listSharedHomes(): List<String> {
+    fun listSharedHomeRecords(): List<HomeListEntry> {
         connection.prepareStatement(
             """
-            SELECT DISTINCT home_name
-            FROM homes
-            WHERE is_shared = 1
-            ORDER BY home_name COLLATE NOCASE;
+            SELECT h.home_name, h.world_name, h.x, h.y, h.z, h.yaw, h.pitch
+            FROM homes h
+            WHERE h.is_shared = 1
+              AND h.player_uuid = (
+                  SELECT MIN(owner.player_uuid)
+                  FROM homes owner
+                  WHERE owner.is_shared = 1
+                    AND owner.home_name = h.home_name COLLATE NOCASE
+              )
+            ORDER BY h.home_name COLLATE NOCASE;
             """.trimIndent()
         ).use { statement ->
             statement.executeQuery().use { resultSet ->
-                val homes = mutableListOf<String>()
+                val homes = mutableListOf<HomeListEntry>()
                 while (resultSet.next()) {
-                    homes += resultSet.getString("home_name")
+                    homes += HomeListEntry(
+                        name = resultSet.getString("home_name"),
+                        home = resultSet.toHomeRecord()
+                    )
                 }
                 return homes
             }
@@ -267,6 +276,52 @@ class HomeRepository private constructor(private val connection: Connection) {
         ).use { statement ->
             statement.setString(1, playerId.toString())
             statement.setString(2, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun updateSharedHomeLocation(homeName: String, location: Location): Boolean {
+        val world = location.world ?: throw IllegalArgumentException("Cannot save home without world.")
+        connection.prepareStatement(
+            """
+            UPDATE homes
+            SET world_name = ?, x = ?, y = ?, z = ?, yaw = ?, pitch = ?
+            WHERE rowid = (
+                SELECT rowid
+                FROM homes
+                WHERE is_shared = 1 AND home_name = ? COLLATE NOCASE
+                ORDER BY player_uuid
+                LIMIT 1
+            );
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, world.name)
+            statement.setDouble(2, location.x)
+            statement.setDouble(3, location.y)
+            statement.setDouble(4, location.z)
+            statement.setFloat(5, location.yaw)
+            statement.setFloat(6, location.pitch)
+            statement.setString(7, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun deleteSharedHome(homeName: String): Boolean {
+        connection.prepareStatement(
+            """
+            DELETE FROM homes
+            WHERE rowid = (
+                SELECT rowid
+                FROM homes
+                WHERE is_shared = 1 AND home_name = ? COLLATE NOCASE
+                ORDER BY player_uuid
+                LIMIT 1
+            );
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, homeName)
             return statement.executeUpdate() > 0
         }
     }
