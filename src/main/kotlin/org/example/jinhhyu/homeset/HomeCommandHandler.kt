@@ -4,8 +4,9 @@ import java.sql.SQLException
 import java.util.Locale
 import java.util.UUID
 import java.util.logging.Level
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
-import org.bukkit.ChatColor
 import org.bukkit.Location
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
@@ -15,6 +16,28 @@ import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitTask
+
+internal fun wouldExceedPersonalHomeLimit(
+    maxHomesPerPlayer: Int,
+    personalHomeCount: Int,
+    homeAlreadyPersonal: Boolean,
+    visibilityOptionIsShared: Boolean
+): Boolean {
+    if (maxHomesPerPlayer <= 0 || visibilityOptionIsShared) {
+        return false
+    }
+
+    return !homeAlreadyPersonal && personalHomeCount >= maxHomesPerPlayer
+}
+
+internal fun homeListMessage(
+    prefix: String,
+    homes: List<String>
+): Pair<String, Map<String, String>> = if (homes.isEmpty()) {
+    "${prefix}_empty" to emptyMap()
+} else {
+    "${prefix}_list" to mapOf("homes" to homes.joinToString(", "))
+}
 
 class HomeCommandHandler(
     private val plugin: JavaPlugin,
@@ -26,11 +49,6 @@ class HomeCommandHandler(
         PRIVATE
     }
 
-    private enum class HomesViewMode {
-        SHARED,
-        PERSONAL
-    }
-
     private data class PendingHomeTeleport(
         val task: BukkitTask,
         val startLocation: Location
@@ -38,9 +56,33 @@ class HomeCommandHandler(
 
     private val defaultHomeName = "default"
     private val homeNamePattern = Regex("^[A-Za-z0-9_-]{1,32}$")
-    private val shareRegisteredValues = setOf("true", "yes", "y", "1", "on", "registered", "share", "shared")
-    private val shareUnregisteredValues = setOf("false", "no", "n", "0", "off", "unregistered", "unshare")
+    private val shareValues = setOf("true", "yes", "y", "1", "on", "share", "shared")
+    private val unshareValues = setOf("false", "no", "n", "0", "off", "unshare")
     private val pendingHomeTeleports = mutableMapOf<UUID, PendingHomeTeleport>()
+    private val legacyAmpersandSerializer = LegacyComponentSerializer.legacyAmpersand()
+    internal val homesGui = HomesGui(
+        plugin = plugin,
+        onTeleport = { player, homeName, viewMode ->
+            handleHomeTeleport(player, arrayOf(homeName), viewMode)
+        },
+        onDeleteConfirmed = { player, homeName, page, viewMode ->
+            when (viewMode) {
+                HomesViewMode.PERSONAL -> deleteHome(player, homeName)
+                HomesViewMode.SHARED -> deleteSharedHome(player, homeName)
+            }
+            openHomesGui(player, page, viewMode)
+        },
+        onHomeIconChanged = { player, homeName, iconColor, page ->
+            changePersonalHomeIcon(player, homeName, iconColor)
+            openHomesGui(player, page)
+        },
+        onSharedHomeUpdateConfirmed = { player, homeName, page ->
+            updateSharedHomeLocation(player, homeName)
+            openHomesGui(player, page, HomesViewMode.SHARED)
+        },
+        canManageSharedHomes = ::hasSharedHomeManagePermission,
+        onViewChanged = { player, viewMode -> openHomesGui(player, viewMode = viewMode) }
+    )
 
     fun executeCommand(
         sender: CommandSender,
@@ -62,6 +104,7 @@ class HomeCommandHandler(
             "home" -> handleHome(sender, args)
             "delhome" -> handleDeleteHome(sender, args)
             "homes" -> handleHomesCommand(sender, args)
+            "homelist" -> handleHomeListCommand(sender, args)
             else -> false
         }
     }
@@ -163,16 +206,26 @@ class HomeCommandHandler(
 
         return try {
             val maxHomesPerPlayer = getMaxHomesPerPlayer()
-            if (maxHomesPerPlayer > 0) {
-                val existingHomes = homeRepository.listHomes(player.uniqueId)
-                if (homeName !in existingHomes && existingHomes.size >= maxHomesPerPlayer) {
-                    sendConfiguredMessage(
-                        player,
-                        "sethome_limit_reached",
-                        mapOf("max_homes" to maxHomesPerPlayer.toString())
-                    )
-                    return true
-                }
+            val visibilityOptionIsShared = visibilityOption == SetHomeVisibilityOption.SHARED
+            val personalHomeUsage = if (maxHomesPerPlayer > 0 && !visibilityOptionIsShared) {
+                homeRepository.getPersonalHomeUsage(player.uniqueId, homeName)
+            } else {
+                null
+            }
+            if (
+                wouldExceedPersonalHomeLimit(
+                    maxHomesPerPlayer = maxHomesPerPlayer,
+                    personalHomeCount = personalHomeUsage?.first ?: 0,
+                    homeAlreadyPersonal = personalHomeUsage?.second == true,
+                    visibilityOptionIsShared = visibilityOptionIsShared
+                )
+            ) {
+                sendConfiguredMessage(
+                    player,
+                    "sethome_limit_reached",
+                    mapOf("max_homes" to maxHomesPerPlayer.toString())
+                )
+                return true
             }
 
             if (
@@ -183,9 +236,8 @@ class HomeCommandHandler(
                 return true
             }
 
-            homeRepository.saveHome(player.uniqueId, homeName, player.location)
             val shouldShare = visibilityOption == SetHomeVisibilityOption.SHARED
-            homeRepository.setHomeShared(player.uniqueId, homeName, shouldShare)
+            homeRepository.saveHome(player.uniqueId, homeName, player.location, shouldShare)
             val successMessageKey = if (shouldShare) "sethome_success_shared" else "sethome_success_private"
             sendConfiguredMessage(player, successMessageKey, mapOf("home_name" to homeName))
             true
@@ -224,7 +276,11 @@ class HomeCommandHandler(
         }
     }
 
-    private fun handleHomeTeleport(player: Player, args: Array<out String>): Boolean {
+    private fun handleHomeTeleport(
+        player: Player,
+        args: Array<out String>,
+        viewMode: HomesViewMode? = null
+    ): Boolean {
         if (!canUseHomeTeleport(player)) {
             return true
         }
@@ -236,8 +292,12 @@ class HomeCommandHandler(
         }
 
         return try {
-            val home = homeRepository.findPersonalHome(player.uniqueId, homeName)
-                ?: homeRepository.findSharedHome(homeName)
+            val home = when (viewMode) {
+                HomesViewMode.PERSONAL -> homeRepository.findPersonalHome(player.uniqueId, homeName)
+                HomesViewMode.SHARED -> homeRepository.findSharedHome(homeName)
+                null -> homeRepository.findPersonalHome(player.uniqueId, homeName)
+                    ?: homeRepository.findSharedHome(homeName)
+            }
             if (home == null) {
                 sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
                 return true
@@ -275,7 +335,7 @@ class HomeCommandHandler(
                 return true
             }
 
-            // Default option is "unregistered" when the provided option is not recognized.
+            // Default option is "unshare" when the provided option is not recognized.
             val shouldShare = parseShareFlag(args[1]) ?: false
             if (shouldShare && homeRepository.isSharedHomeNameTakenByAnotherPlayer(player.uniqueId, homeName)) {
                 sendConfiguredMessage(player, "home_share_name_taken", mapOf("home_name" to homeName))
@@ -305,24 +365,80 @@ class HomeCommandHandler(
             return true
         }
 
-        return try {
+        deleteHome(player, homeName)
+        return true
+    }
+
+    private fun deleteHome(player: Player, homeName: String) {
+        try {
             val deleted = homeRepository.deleteHome(player.uniqueId, homeName)
             if (deleted) {
                 sendConfiguredMessage(player, "delhome_success", mapOf("home_name" to homeName))
             } else {
                 sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
             }
-            true
         } catch (exception: SQLException) {
             plugin.logger.warning("Failed to delete home '$homeName' for ${player.uniqueId}: ${exception.message}")
             sendConfiguredMessage(player, "delhome_db_error")
-            true
+        }
+    }
+
+    private fun changePersonalHomeIcon(player: Player, homeName: String, iconColor: String) {
+        try {
+            homeRepository.setPersonalHomeIconColor(player.uniqueId, homeName, iconColor)
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to change home icon for '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "homes_db_error")
+        }
+    }
+
+    private fun updateSharedHomeLocation(player: Player, homeName: String) {
+        if (!hasSharedHomeManagePermission(player)) {
+            sendConfiguredMessage(
+                player,
+                "shared_home_update_permission_denied",
+                mapOf("permission" to getSharedHomeManagePermissionDisplay())
+            )
+            return
+        }
+
+        try {
+            if (homeRepository.updateSharedHomeLocation(homeName, player.location)) {
+                sendConfiguredMessage(player, "shared_home_update_success", mapOf("home_name" to homeName))
+            } else {
+                sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
+            }
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to update shared home '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "shared_home_update_db_error")
+        }
+    }
+
+    private fun deleteSharedHome(player: Player, homeName: String) {
+        if (!hasSharedHomeManagePermission(player)) {
+            sendConfiguredMessage(
+                player,
+                "shared_home_delete_permission_denied",
+                mapOf("permission" to getSharedHomeManagePermissionDisplay())
+            )
+            return
+        }
+
+        try {
+            if (homeRepository.deleteSharedHome(homeName)) {
+                sendConfiguredMessage(player, "shared_home_delete_success", mapOf("home_name" to homeName))
+            } else {
+                sendConfiguredMessage(player, "home_not_found", mapOf("home_name" to homeName))
+            }
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to delete shared home '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "shared_home_delete_db_error")
         }
     }
 
     private fun handleHomesCommand(player: Player, args: Array<out String>): Boolean {
         if (args.isEmpty()) {
-            return handleHomesList(player, HomesViewMode.PERSONAL)
+            return openHomesGui(player)
         }
 
         if (args.size != 1) {
@@ -336,40 +452,47 @@ class HomeCommandHandler(
             return true
         }
 
-        return handleHomesList(player, viewMode)
+        return when (viewMode) {
+            HomesViewMode.PERSONAL -> openHomesGui(player)
+            HomesViewMode.SHARED -> openHomesGui(player, viewMode = HomesViewMode.SHARED)
+        }
     }
 
-    private fun handleHomesList(player: Player, viewMode: HomesViewMode): Boolean {
+    private fun handleHomeListCommand(player: Player, args: Array<out String>): Boolean {
+        if (args.isNotEmpty()) {
+            sendConfiguredMessage(player, "usage_homelist")
+            return true
+        }
+
         return try {
-            when (viewMode) {
-                HomesViewMode.PERSONAL -> {
-                    val homes = homeRepository.listPersonalHomes(player.uniqueId)
-                    if (homes.isEmpty()) {
-                        sendConfiguredMessage(player, "homes_empty")
-                    } else {
-                        sendConfiguredMessage(
-                            player,
-                            "homes_list",
-                            mapOf("homes" to homes.joinToString(", "))
-                        )
-                    }
-                }
-                HomesViewMode.SHARED -> {
-                    val sharedHomes = homeRepository.listSharedHomes()
-                    if (sharedHomes.isEmpty()) {
-                        sendConfiguredMessage(player, "shared_homes_empty")
-                    } else {
-                        sendConfiguredMessage(
-                            player,
-                            "shared_homes_list",
-                            mapOf("homes" to sharedHomes.joinToString(", "))
-                        )
-                    }
-                }
+            val personalHomes = homeRepository.listPersonalHomeRecords(player.uniqueId).map(HomeListEntry::name)
+            val sharedHomes = homeRepository.listSharedHomeRecords().map(HomeListEntry::name)
+            listOf("homes" to personalHomes, "shared_homes" to sharedHomes).forEach { (prefix, homes) ->
+                val (key, placeholders) = homeListMessage(prefix, homes)
+                sendConfiguredMessage(player, key, placeholders)
             }
             true
         } catch (exception: SQLException) {
             plugin.logger.warning("Failed to list homes for ${player.uniqueId}: ${exception.message}")
+            sendConfiguredMessage(player, "homes_db_error")
+            true
+        }
+    }
+
+    private fun openHomesGui(
+        player: Player,
+        page: Int = 0,
+        viewMode: HomesViewMode = HomesViewMode.PERSONAL
+    ): Boolean {
+        return try {
+            val homes = when (viewMode) {
+                HomesViewMode.PERSONAL -> homeRepository.listPersonalHomeRecords(player.uniqueId)
+                HomesViewMode.SHARED -> homeRepository.listSharedHomeRecords()
+            }
+            homesGui.open(player, homes, viewMode, page)
+            true
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to list ${viewMode.name.lowercase()} homes: ${exception.message}")
             sendConfiguredMessage(player, "homes_db_error")
             true
         }
@@ -386,7 +509,7 @@ class HomeCommandHandler(
 
     private fun loadSharedHomesSafely(): List<String> {
         return try {
-            homeRepository.listSharedHomes()
+            homeRepository.listSharedHomeRecords().map(HomeListEntry::name)
         } catch (exception: SQLException) {
             plugin.logger.warning("Failed to load tab completion shared homes: ${exception.message}")
             emptyList()
@@ -430,8 +553,8 @@ class HomeCommandHandler(
     private fun parseShareFlag(rawValue: String): Boolean? {
         val normalized = rawValue.lowercase(Locale.ROOT)
         return when {
-            normalized in shareRegisteredValues -> true
-            normalized in shareUnregisteredValues -> false
+            normalized in shareValues -> true
+            normalized in unshareValues -> false
             else -> null
         }
     }
@@ -455,7 +578,7 @@ class HomeCommandHandler(
 
     private fun suggestShareStates(rawPrefix: String): List<String> {
         val prefix = rawPrefix.lowercase(Locale.ROOT)
-        return listOf("registered", "unregistered").filter { it.startsWith(prefix) }
+        return listOf("share", "unshare").filter { it.startsWith(prefix) }
     }
 
     private fun parseHomesViewMode(rawValue: String): HomesViewMode? {
@@ -544,7 +667,7 @@ class HomeCommandHandler(
     @EventHandler(ignoreCancelled = true)
     fun onPlayerMove(event: PlayerMoveEvent) {
         val pendingTeleport = pendingHomeTeleports[event.player.uniqueId] ?: return
-        val toLocation = event.to ?: return
+        val toLocation = event.to
         if (!hasMovedBlocks(pendingTeleport.startLocation, toLocation)) {
             return
         }
@@ -591,18 +714,24 @@ class HomeCommandHandler(
         key: String,
         placeholders: Map<String, String> = emptyMap()
     ) {
-        sender.sendMessage(resolveMessage(key, placeholders))
+        sender.sendMessage(resolveMessage(sender, key, placeholders))
     }
 
     private fun resolveMessage(
+        sender: CommandSender,
         key: String,
         placeholders: Map<String, String> = emptyMap()
-    ): String {
-        val template = plugin.config.getString("messages.$key") ?: key
+    ): Component {
+        val section = if (sender is Player) {
+            localizedHomeSection("messages", sender.locale().language)
+        } else "messages"
+        val template = plugin.config.getString("$section.$key")
+            ?: plugin.config.getString("messages.$key")
+            ?: key
         val interpolated = placeholders.entries.fold(template) { message, (placeholder, value) ->
             message.replace("{$placeholder}", value)
         }
-        return ChatColor.translateAlternateColorCodes('&', interpolated)
+        return legacyAmpersandSerializer.deserialize(interpolated)
     }
 
     private fun normalizeHomeName(name: String): String = name.lowercase(Locale.ROOT)

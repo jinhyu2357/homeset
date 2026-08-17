@@ -3,6 +3,7 @@ package org.example.jinhhyu.homeset
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.UUID
 import org.bukkit.Location
@@ -14,6 +15,12 @@ data class HomeRecord(
     val z: Double,
     val yaw: Float,
     val pitch: Float
+)
+
+data class HomeListEntry(
+    val name: String,
+    val home: HomeRecord,
+    val iconColor: String = "WHITE"
 )
 
 class HomeRepository private constructor(private val connection: Connection) {
@@ -41,6 +48,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     yaw REAL NOT NULL,
                     pitch REAL NOT NULL,
                     is_shared INTEGER NOT NULL DEFAULT 0,
+                    icon_color TEXT NOT NULL DEFAULT 'WHITE',
                     PRIMARY KEY (player_uuid, home_name)
                 );
                 """.trimIndent()
@@ -64,6 +72,22 @@ class HomeRepository private constructor(private val connection: Connection) {
             }
         }
 
+        try {
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    """
+                    ALTER TABLE homes
+                    ADD COLUMN icon_color TEXT NOT NULL DEFAULT 'WHITE';
+                    """.trimIndent()
+                )
+            }
+        } catch (exception: SQLException) {
+            val message = exception.message.orEmpty()
+            if (!message.contains("duplicate column name", ignoreCase = true)) {
+                throw exception
+            }
+        }
+
         connection.createStatement().use { statement ->
             statement.executeUpdate(
                 """
@@ -75,19 +99,20 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun saveHome(playerId: UUID, homeName: String, location: Location) {
+    fun saveHome(playerId: UUID, homeName: String, location: Location, shared: Boolean) {
         val world = location.world ?: throw IllegalArgumentException("Cannot save home without world.")
         connection.prepareStatement(
             """
             INSERT INTO homes (player_uuid, home_name, world_name, x, y, z, yaw, pitch, is_shared)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_uuid, home_name) DO UPDATE SET
                 world_name = excluded.world_name,
                 x = excluded.x,
                 y = excluded.y,
                 z = excluded.z,
                 yaw = excluded.yaw,
-                pitch = excluded.pitch;
+                pitch = excluded.pitch,
+                is_shared = excluded.is_shared;
             """.trimIndent()
         ).use { statement ->
             statement.setString(1, playerId.toString())
@@ -98,7 +123,26 @@ class HomeRepository private constructor(private val connection: Connection) {
             statement.setDouble(6, location.z)
             statement.setFloat(7, location.yaw)
             statement.setFloat(8, location.pitch)
+            statement.setInt(9, if (shared) 1 else 0)
             statement.executeUpdate()
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun getPersonalHomeUsage(playerId: UUID, homeName: String): Pair<Int, Boolean> {
+        connection.prepareStatement(
+            """
+            SELECT COUNT(*), COUNT(CASE WHEN home_name = ? THEN 1 END)
+            FROM homes
+            WHERE player_uuid = ? AND is_shared = 0;
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, homeName)
+            statement.setString(2, playerId.toString())
+            statement.executeQuery().use { resultSet ->
+                resultSet.next()
+                return resultSet.getInt(1) to (resultSet.getInt(2) > 0)
+            }
         }
     }
 
@@ -118,14 +162,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -146,14 +183,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -175,14 +205,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     return null
                 }
 
-                return HomeRecord(
-                    worldName = resultSet.getString("world_name"),
-                    x = resultSet.getDouble("x"),
-                    y = resultSet.getDouble("y"),
-                    z = resultSet.getDouble("z"),
-                    yaw = resultSet.getFloat("yaw"),
-                    pitch = resultSet.getFloat("pitch")
-                )
+                return resultSet.toHomeRecord()
             }
         }
     }
@@ -209,10 +232,10 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun listPersonalHomes(playerId: UUID): List<String> {
+    fun listPersonalHomeRecords(playerId: UUID): List<HomeListEntry> {
         connection.prepareStatement(
             """
-            SELECT home_name
+            SELECT home_name, world_name, x, y, z, yaw, pitch, icon_color
             FROM homes
             WHERE player_uuid = ? AND is_shared = 0
             ORDER BY home_name COLLATE NOCASE;
@@ -220,9 +243,13 @@ class HomeRepository private constructor(private val connection: Connection) {
         ).use { statement ->
             statement.setString(1, playerId.toString())
             statement.executeQuery().use { resultSet ->
-                val homes = mutableListOf<String>()
+                val homes = mutableListOf<HomeListEntry>()
                 while (resultSet.next()) {
-                    homes += resultSet.getString("home_name")
+                    homes += HomeListEntry(
+                        name = resultSet.getString("home_name"),
+                        home = resultSet.toHomeRecord(),
+                        iconColor = resultSet.getString("icon_color")
+                    )
                 }
                 return homes
             }
@@ -230,19 +257,28 @@ class HomeRepository private constructor(private val connection: Connection) {
     }
 
     @Throws(SQLException::class)
-    fun listSharedHomes(): List<String> {
+    fun listSharedHomeRecords(): List<HomeListEntry> {
         connection.prepareStatement(
             """
-            SELECT DISTINCT home_name
-            FROM homes
-            WHERE is_shared = 1
-            ORDER BY home_name COLLATE NOCASE;
+            SELECT h.home_name, h.world_name, h.x, h.y, h.z, h.yaw, h.pitch
+            FROM homes h
+            WHERE h.is_shared = 1
+              AND h.player_uuid = (
+                  SELECT MIN(owner.player_uuid)
+                  FROM homes owner
+                  WHERE owner.is_shared = 1
+                    AND owner.home_name = h.home_name COLLATE NOCASE
+              )
+            ORDER BY h.home_name COLLATE NOCASE;
             """.trimIndent()
         ).use { statement ->
             statement.executeQuery().use { resultSet ->
-                val homes = mutableListOf<String>()
+                val homes = mutableListOf<HomeListEntry>()
                 while (resultSet.next()) {
-                    homes += resultSet.getString("home_name")
+                    homes += HomeListEntry(
+                        name = resultSet.getString("home_name"),
+                        home = resultSet.toHomeRecord()
+                    )
                 }
                 return homes
             }
@@ -259,6 +295,68 @@ class HomeRepository private constructor(private val connection: Connection) {
         ).use { statement ->
             statement.setString(1, playerId.toString())
             statement.setString(2, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun setPersonalHomeIconColor(playerId: UUID, homeName: String, iconColor: String): Boolean {
+        connection.prepareStatement(
+            """
+            UPDATE homes
+            SET icon_color = ?
+            WHERE player_uuid = ? AND home_name = ? AND is_shared = 0;
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, iconColor)
+            statement.setString(2, playerId.toString())
+            statement.setString(3, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun updateSharedHomeLocation(homeName: String, location: Location): Boolean {
+        val world = location.world ?: throw IllegalArgumentException("Cannot save home without world.")
+        connection.prepareStatement(
+            """
+            UPDATE homes
+            SET world_name = ?, x = ?, y = ?, z = ?, yaw = ?, pitch = ?
+            WHERE rowid = (
+                SELECT rowid
+                FROM homes
+                WHERE is_shared = 1 AND home_name = ? COLLATE NOCASE
+                ORDER BY player_uuid
+                LIMIT 1
+            );
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, world.name)
+            statement.setDouble(2, location.x)
+            statement.setDouble(3, location.y)
+            statement.setDouble(4, location.z)
+            statement.setFloat(5, location.yaw)
+            statement.setFloat(6, location.pitch)
+            statement.setString(7, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun deleteSharedHome(homeName: String): Boolean {
+        connection.prepareStatement(
+            """
+            DELETE FROM homes
+            WHERE rowid = (
+                SELECT rowid
+                FROM homes
+                WHERE is_shared = 1 AND home_name = ? COLLATE NOCASE
+                ORDER BY player_uuid
+                LIMIT 1
+            );
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, homeName)
             return statement.executeUpdate() > 0
         }
     }
@@ -325,3 +423,12 @@ class HomeRepository private constructor(private val connection: Connection) {
         }
     }
 }
+
+private fun ResultSet.toHomeRecord(): HomeRecord = HomeRecord(
+    worldName = getString("world_name"),
+    x = getDouble("x"),
+    y = getDouble("y"),
+    z = getDouble("z"),
+    yaw = getFloat("yaw"),
+    pitch = getFloat("pitch")
+)
