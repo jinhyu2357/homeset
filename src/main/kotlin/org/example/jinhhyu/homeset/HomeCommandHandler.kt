@@ -30,6 +30,15 @@ internal fun wouldExceedPersonalHomeLimit(
     return !homeAlreadyPersonal && personalHomeCount >= maxHomesPerPlayer
 }
 
+internal fun homeListMessage(
+    prefix: String,
+    homes: List<String>
+): Pair<String, Map<String, String>> = if (homes.isEmpty()) {
+    "${prefix}_empty" to emptyMap()
+} else {
+    "${prefix}_list" to mapOf("homes" to homes.joinToString(", "))
+}
+
 class HomeCommandHandler(
     private val plugin: JavaPlugin,
     private val homeRepository: HomeRepository,
@@ -63,6 +72,10 @@ class HomeCommandHandler(
             }
             openHomesGui(player, page, viewMode)
         },
+        onHomeIconChanged = { player, homeName, iconColor, page ->
+            changePersonalHomeIcon(player, homeName, iconColor)
+            openHomesGui(player, page)
+        },
         onSharedHomeUpdateConfirmed = { player, homeName, page ->
             updateSharedHomeLocation(player, homeName)
             openHomesGui(player, page, HomesViewMode.SHARED)
@@ -91,6 +104,7 @@ class HomeCommandHandler(
             "home" -> handleHome(sender, args)
             "delhome" -> handleDeleteHome(sender, args)
             "homes" -> handleHomesCommand(sender, args)
+            "homelist" -> handleHomeListCommand(sender, args)
             else -> false
         }
     }
@@ -369,6 +383,15 @@ class HomeCommandHandler(
         }
     }
 
+    private fun changePersonalHomeIcon(player: Player, homeName: String, iconColor: String) {
+        try {
+            homeRepository.setPersonalHomeIconColor(player.uniqueId, homeName, iconColor)
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to change home icon for '$homeName': ${exception.message}")
+            sendConfiguredMessage(player, "homes_db_error")
+        }
+    }
+
     private fun updateSharedHomeLocation(player: Player, homeName: String) {
         if (!hasSharedHomeManagePermission(player)) {
             sendConfiguredMessage(
@@ -432,6 +455,27 @@ class HomeCommandHandler(
         return when (viewMode) {
             HomesViewMode.PERSONAL -> openHomesGui(player)
             HomesViewMode.SHARED -> openHomesGui(player, viewMode = HomesViewMode.SHARED)
+        }
+    }
+
+    private fun handleHomeListCommand(player: Player, args: Array<out String>): Boolean {
+        if (args.isNotEmpty()) {
+            sendConfiguredMessage(player, "usage_homelist")
+            return true
+        }
+
+        return try {
+            val personalHomes = homeRepository.listPersonalHomeRecords(player.uniqueId).map(HomeListEntry::name)
+            val sharedHomes = homeRepository.listSharedHomeRecords().map(HomeListEntry::name)
+            listOf("homes" to personalHomes, "shared_homes" to sharedHomes).forEach { (prefix, homes) ->
+                val (key, placeholders) = homeListMessage(prefix, homes)
+                sendConfiguredMessage(player, key, placeholders)
+            }
+            true
+        } catch (exception: SQLException) {
+            plugin.logger.warning("Failed to list homes for ${player.uniqueId}: ${exception.message}")
+            sendConfiguredMessage(player, "homes_db_error")
+            true
         }
     }
 
@@ -670,14 +714,20 @@ class HomeCommandHandler(
         key: String,
         placeholders: Map<String, String> = emptyMap()
     ) {
-        sender.sendMessage(resolveMessage(key, placeholders))
+        sender.sendMessage(resolveMessage(sender, key, placeholders))
     }
 
     private fun resolveMessage(
+        sender: CommandSender,
         key: String,
         placeholders: Map<String, String> = emptyMap()
     ): Component {
-        val template = plugin.config.getString("messages.$key") ?: key
+        val section = if (sender is Player) {
+            localizedHomeSection("messages", sender.locale().language)
+        } else "messages"
+        val template = plugin.config.getString("$section.$key")
+            ?: plugin.config.getString("messages.$key")
+            ?: key
         val interpolated = placeholders.entries.fold(template) { message, (placeholder, value) ->
             message.replace("{$placeholder}", value)
         }

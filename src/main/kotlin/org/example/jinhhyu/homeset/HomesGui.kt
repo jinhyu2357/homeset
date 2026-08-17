@@ -1,6 +1,7 @@
 package org.example.jinhhyu.homeset
 
 import java.util.UUID
+import java.util.Locale
 import kotlin.math.floor
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
@@ -24,6 +25,17 @@ internal const val HOMES_PER_PAGE = 5
 internal fun homesPageCount(homeCount: Int): Int =
     if (homeCount <= 0) 1 else (homeCount - 1) / HOMES_PER_PAGE + 1
 
+internal val HOME_ICON_COLORS = listOf(
+    "WHITE", "ORANGE", "MAGENTA", "LIGHT_BLUE", "YELLOW", "LIME", "PINK", "GRAY",
+    "LIGHT_GRAY", "CYAN", "PURPLE", "BLUE", "BROWN", "GREEN", "RED", "BLACK"
+)
+
+internal fun nextHomeIconColor(current: String): String =
+    HOME_ICON_COLORS[(HOME_ICON_COLORS.indexOf(current) + 1) % HOME_ICON_COLORS.size]
+
+internal fun localizedHomeSection(base: String, language: String): String =
+    "${base}_${language.lowercase(Locale.ROOT)}"
+
 enum class HomesViewMode(
     val title: String,
     val allowsDeletion: Boolean,
@@ -37,6 +49,7 @@ class HomesGui(
     private val plugin: JavaPlugin,
     private val onTeleport: (Player, String, HomesViewMode) -> Unit,
     private val onDeleteConfirmed: (Player, String, Int, HomesViewMode) -> Unit,
+    private val onHomeIconChanged: (Player, String, String, Int) -> Unit,
     private val onSharedHomeUpdateConfirmed: (Player, String, Int) -> Unit,
     private val canManageSharedHomes: (Player) -> Boolean,
     private val onViewChanged: (Player, HomesViewMode) -> Unit
@@ -53,6 +66,7 @@ class HomesGui(
         INFO,
         TELEPORT,
         DELETE,
+        CHANGE_ICON,
         PREVIOUS,
         NEXT,
         VIEW_PERSONAL,
@@ -105,10 +119,15 @@ class HomesGui(
         val pageCount = homesPageCount(homes.size)
         val page = requestedPage.coerceIn(0, pageCount - 1)
         val holder = HomesHolder(player.uniqueId, homes, viewMode, page)
+        val viewTitle = guiText(
+            player,
+            if (viewMode == HomesViewMode.PERSONAL) "personal_homes" else "shared_homes",
+            viewMode.title
+        )
         val inventory = Bukkit.createInventory(
             holder,
             INVENTORY_SIZE,
-            uiText("${viewMode.title} · ${page + 1}/$pageCount", NamedTextColor.DARK_GREEN)
+            uiText("$viewTitle · ${page + 1}/$pageCount", NamedTextColor.DARK_GREEN)
         )
         holder.backingInventory = inventory
 
@@ -121,7 +140,11 @@ class HomesGui(
                 22,
                 guiItem(
                     Material.BARRIER,
-                    if (viewMode == HomesViewMode.SHARED) "No shared homes" else "No private homes",
+                    if (viewMode == HomesViewMode.SHARED) {
+                        guiText(player, "no_shared_homes", "No shared homes")
+                    } else {
+                        guiText(player, "no_private_homes", "No private homes")
+                    },
                     NamedTextColor.GRAY,
                     action = Action.INFO
                 )
@@ -132,7 +155,7 @@ class HomesGui(
                 PREVIOUS_SLOT,
                 guiItem(
                     Material.ARROW,
-                    "Previous",
+                    guiText(player, "previous", "Previous"),
                     NamedTextColor.YELLOW,
                     action = Action.PREVIOUS,
                     targetPage = page - 1
@@ -143,7 +166,12 @@ class HomesGui(
             PAGE_SLOT,
             guiItem(
                 Material.PAPER,
-                "Page ${page + 1} / $pageCount",
+                guiText(
+                    player,
+                    "page",
+                    "Page {current} / {total}",
+                    mapOf("current" to (page + 1).toString(), "total" to pageCount.toString())
+                ),
                 NamedTextColor.GOLD,
                 action = Action.INFO
             )
@@ -153,7 +181,11 @@ class HomesGui(
             VIEW_SLOT,
             guiItem(
                 if (targetView == HomesViewMode.SHARED) Material.ENDER_CHEST else Material.WHITE_BED,
-                "View ${targetView.title}",
+                guiText(
+                    player,
+                    if (targetView == HomesViewMode.PERSONAL) "view_personal_homes" else "view_shared_homes",
+                    "View ${targetView.title}"
+                ),
                 NamedTextColor.AQUA,
                 action = if (targetView == HomesViewMode.SHARED) Action.VIEW_SHARED else Action.VIEW_PERSONAL
             )
@@ -163,7 +195,7 @@ class HomesGui(
                 NEXT_SLOT,
                 guiItem(
                     Material.ARROW,
-                    "Next",
+                    guiText(player, "next", "Next"),
                     NamedTextColor.YELLOW,
                     action = Action.NEXT,
                     targetPage = page + 1
@@ -230,16 +262,23 @@ class HomesGui(
         inventory.setItem(
             firstSlot,
             guiItem(
-                if (viewMode == HomesViewMode.SHARED) Material.CYAN_BED else Material.WHITE_BED,
+                if (viewMode == HomesViewMode.SHARED) Material.CYAN_BED else homeIcon(entry.iconColor),
                 entry.name,
                 NamedTextColor.GOLD,
-                listOf(
-                    "World: ${home.worldName}",
+                listOfNotNull(
+                    guiText(
+                        player,
+                        "world",
+                        "World: {world}",
+                        mapOf("world" to home.worldName)
+                    ),
                     "X: ${blockCoordinate(home.x)}",
                     "Y: ${blockCoordinate(home.y)}",
-                    "Z: ${blockCoordinate(home.z)}"
+                    "Z: ${blockCoordinate(home.z)}",
+                    guiText(player, "change_color", "Click to change color")
+                        .takeIf { viewMode == HomesViewMode.PERSONAL }
                 ),
-                Action.INFO,
+                if (viewMode == HomesViewMode.PERSONAL) Action.CHANGE_ICON else Action.INFO,
                 entry.name
             )
         )
@@ -247,9 +286,16 @@ class HomesGui(
             firstSlot + 7,
             guiItem(
                 Material.ARROW,
-                "Teleport",
+                guiText(player, "teleport", "Teleport"),
                 NamedTextColor.GREEN,
-                listOf("Teleport to ${entry.name}"),
+                listOf(
+                    guiText(
+                        player,
+                        "teleport_to",
+                        "Teleport to {home}",
+                        mapOf("home" to entry.name)
+                    )
+                ),
                 Action.TELEPORT,
                 entry.name
             )
@@ -259,9 +305,9 @@ class HomesGui(
                 firstSlot + 8,
                 guiItem(
                     Material.LAVA_BUCKET,
-                    "Delete Home",
+                    guiText(player, "delete_home", "Delete Home"),
                     NamedTextColor.RED,
-                    listOf("Delete ${entry.name}"),
+                    listOf(guiText(player, "delete", "Delete {home}", mapOf("home" to entry.name))),
                     Action.DELETE,
                     entry.name
                 )
@@ -271,9 +317,9 @@ class HomesGui(
                 firstSlot + 6,
                 guiItem(
                     Material.LAVA_BUCKET,
-                    "Delete Shared Home",
+                    guiText(player, "delete_shared_home", "Delete Shared Home"),
                     NamedTextColor.RED,
-                    listOf("Delete ${entry.name}"),
+                    listOf(guiText(player, "delete", "Delete {home}", mapOf("home" to entry.name))),
                     Action.DELETE,
                     entry.name
                 )
@@ -282,9 +328,16 @@ class HomesGui(
                 firstSlot + 8,
                 guiItem(
                     Material.WHITE_BED,
-                    "Update Shared Home",
+                    guiText(player, "update_shared_home", "Update Shared Home"),
                     NamedTextColor.AQUA,
-                    listOf("Set ${entry.name} to your current location"),
+                    listOf(
+                        guiText(
+                            player,
+                            "set_to_current_location",
+                            "Set {home} to your current location",
+                            mapOf("home" to entry.name)
+                        )
+                    ),
                     Action.UPDATE_SHARED,
                     entry.name
                 )
@@ -322,6 +375,13 @@ class HomesGui(
                     holder.find(homeName) == null
                 ) return
                 nextTick(player) { openSharedUpdateConfirmation(player, holder, homeName!!) }
+            }
+            Action.CHANGE_ICON -> {
+                val home = holder.find(homeName) ?: return
+                if (holder.viewMode != HomesViewMode.PERSONAL) return
+                nextTick(player) {
+                    onHomeIconChanged(player, home.name, nextHomeIconColor(home.iconColor), holder.page)
+                }
             }
             Action.PREVIOUS, Action.NEXT -> {
                 if (targetPage == null || targetPage !in 0 until homesPageCount(holder.homes.size)) return
@@ -382,16 +442,31 @@ class HomesGui(
         val inventory = Bukkit.createInventory(
             holder,
             9,
-            uiText("Delete \"$homeName\"?", NamedTextColor.DARK_RED)
+            uiText(
+                guiText(
+                    player,
+                    "delete_title",
+                    "Delete \"{home}\"?",
+                    mapOf("home" to homeName)
+                ),
+                NamedTextColor.DARK_RED
+            )
         )
         holder.backingInventory = inventory
         inventory.setItem(
             2,
             guiItem(
                 Material.LIME_WOOL,
-                "Confirm",
+                guiText(player, "confirm", "Confirm"),
                 NamedTextColor.GREEN,
-                listOf("Delete $homeName permanently"),
+                listOf(
+                    guiText(
+                        player,
+                        "delete_permanently",
+                        "Delete {home} permanently",
+                        mapOf("home" to homeName)
+                    )
+                ),
                 Action.CONFIRM_DELETE,
                 homeName
             )
@@ -400,7 +475,7 @@ class HomesGui(
             6,
             guiItem(
                 Material.BARRIER,
-                "Cancel",
+                guiText(player, "cancel", "Cancel"),
                 NamedTextColor.RED,
                 action = Action.CANCEL_DELETE,
                 homeName = homeName
@@ -414,16 +489,31 @@ class HomesGui(
         val inventory = Bukkit.createInventory(
             holder,
             9,
-            uiText("Update \"$homeName\"?", NamedTextColor.DARK_AQUA)
+            uiText(
+                guiText(
+                    player,
+                    "update_title",
+                    "Update \"{home}\"?",
+                    mapOf("home" to homeName)
+                ),
+                NamedTextColor.DARK_AQUA
+            )
         )
         holder.backingInventory = inventory
         inventory.setItem(
             2,
             guiItem(
                 Material.WHITE_BED,
-                "Set Current Location",
+                guiText(player, "set_current_location", "Set Current Location"),
                 NamedTextColor.GREEN,
-                listOf("Replace $homeName's saved location"),
+                listOf(
+                    guiText(
+                        player,
+                        "replace_saved_location",
+                        "Replace {home}'s saved location",
+                        mapOf("home" to homeName)
+                    )
+                ),
                 Action.CONFIRM_SHARED_UPDATE,
                 homeName
             )
@@ -432,7 +522,7 @@ class HomesGui(
             6,
             guiItem(
                 Material.BARRIER,
-                "Cancel",
+                guiText(player, "cancel", "Cancel"),
                 NamedTextColor.RED,
                 action = Action.CANCEL_SHARED_UPDATE,
                 homeName = homeName
@@ -473,6 +563,24 @@ class HomesGui(
     }
 
     private fun blockCoordinate(value: Double): Int = floor(value).toInt()
+
+    private fun homeIcon(color: String): Material =
+        Material.matchMaterial("${color}_BED") ?: Material.WHITE_BED
+
+    private fun guiText(
+        player: Player,
+        key: String,
+        fallback: String,
+        placeholders: Map<String, String> = emptyMap()
+    ): String {
+        val section = localizedHomeSection("gui", player.locale().language)
+        val template = plugin.config.getString("$section.$key")
+            ?: plugin.config.getString("gui.$key")
+            ?: fallback
+        return placeholders.entries.fold(template) { text, (placeholder, value) ->
+            text.replace("{$placeholder}", value)
+        }
+    }
 
     private fun uiText(value: String, color: NamedTextColor): Component =
         Component.text(value, color).decoration(TextDecoration.ITALIC, false)

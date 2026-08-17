@@ -19,7 +19,8 @@ data class HomeRecord(
 
 data class HomeListEntry(
     val name: String,
-    val home: HomeRecord
+    val home: HomeRecord,
+    val iconColor: String = "WHITE"
 )
 
 class HomeRepository private constructor(private val connection: Connection) {
@@ -47,6 +48,7 @@ class HomeRepository private constructor(private val connection: Connection) {
                     yaw REAL NOT NULL,
                     pitch REAL NOT NULL,
                     is_shared INTEGER NOT NULL DEFAULT 0,
+                    icon_color TEXT NOT NULL DEFAULT 'WHITE',
                     PRIMARY KEY (player_uuid, home_name)
                 );
                 """.trimIndent()
@@ -60,6 +62,22 @@ class HomeRepository private constructor(private val connection: Connection) {
                     """
                     ALTER TABLE homes
                     ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0;
+                    """.trimIndent()
+                )
+            }
+        } catch (exception: SQLException) {
+            val message = exception.message.orEmpty()
+            if (!message.contains("duplicate column name", ignoreCase = true)) {
+                throw exception
+            }
+        }
+
+        try {
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    """
+                    ALTER TABLE homes
+                    ADD COLUMN icon_color TEXT NOT NULL DEFAULT 'WHITE';
                     """.trimIndent()
                 )
             }
@@ -217,7 +235,7 @@ class HomeRepository private constructor(private val connection: Connection) {
     fun listPersonalHomeRecords(playerId: UUID): List<HomeListEntry> {
         connection.prepareStatement(
             """
-            SELECT home_name, world_name, x, y, z, yaw, pitch
+            SELECT home_name, world_name, x, y, z, yaw, pitch, icon_color
             FROM homes
             WHERE player_uuid = ? AND is_shared = 0
             ORDER BY home_name COLLATE NOCASE;
@@ -229,7 +247,8 @@ class HomeRepository private constructor(private val connection: Connection) {
                 while (resultSet.next()) {
                     homes += HomeListEntry(
                         name = resultSet.getString("home_name"),
-                        home = resultSet.toHomeRecord()
+                        home = resultSet.toHomeRecord(),
+                        iconColor = resultSet.getString("icon_color")
                     )
                 }
                 return homes
@@ -276,6 +295,22 @@ class HomeRepository private constructor(private val connection: Connection) {
         ).use { statement ->
             statement.setString(1, playerId.toString())
             statement.setString(2, homeName)
+            return statement.executeUpdate() > 0
+        }
+    }
+
+    @Throws(SQLException::class)
+    fun setPersonalHomeIconColor(playerId: UUID, homeName: String, iconColor: String): Boolean {
+        connection.prepareStatement(
+            """
+            UPDATE homes
+            SET icon_color = ?
+            WHERE player_uuid = ? AND home_name = ? AND is_shared = 0;
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, iconColor)
+            statement.setString(2, playerId.toString())
+            statement.setString(3, homeName)
             return statement.executeUpdate() > 0
         }
     }

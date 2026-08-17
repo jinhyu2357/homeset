@@ -4,7 +4,7 @@ main: org.example.jinhhyu.homeset.Homeset
 api-version: '26.2'
 permissions:
   homeset.use:
-    description: Allows using /home and /homes.
+    description: Allows using /home, /homes, and /homelist.
     default: true
   homeset.share:
     description: Allows shared-home commands and management through /homes.
